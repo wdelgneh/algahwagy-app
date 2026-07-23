@@ -486,21 +486,31 @@ function renderProducts(){
   let html = `<div class="section-header"><h2>المنتجات والمخزون</h2></div>
   <div class="search-box"><span>${searchIcon()}</span><input id="prodSearch" placeholder="ابحث باسم الصنف أو الوزن" value="${q}"></div>`;
 
+  const totalAdded = DB.products.reduce((s,p)=> s + Number(p.addedQty||p.qty||0), 0);
+  const totalCurrent = DB.products.reduce((s,p)=> s + Number(p.qty||0), 0);
+  html += `<div class="stat-grid" style="margin-bottom:14px;">
+    <div class="stat-card"><div class="stat-value">${totalAdded}</div><div class="stat-label">إجمالي الكمية المدخلة (كل الأوزان)</div></div>
+    <div class="stat-card"><div class="stat-value">${totalCurrent}</div><div class="stat-label">إجمالي الكمية الحالية (كل الأوزان)</div></div>
+  </div>`;
+
   if(!list.length){
     html += emptyState('لا توجد منتجات بعد', 'اضغط + لإضافة أول منتج');
   } else {
     html += list.map(p=>{
       const low = Number(p.qty) <= Number(p.minStock);
+      const added = Number(p.addedQty!=null ? p.addedQty : p.qty);
       return `<div class="card">
         <div class="card-row">
           <div style="display:flex;gap:10px;align-items:center;">
             ${p.photo ? `<img src="${p.photo}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--line);flex-shrink:0;">` : `<div style="width:44px;height:44px;border-radius:10px;background:var(--gold-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;">${ICONS.products}</div>`}
             <div><div class="card-title">${p.name} — ${p.weight}</div>
-            <div class="card-sub">شراء ${fmtMoney(p.buyPrice)} · بيع ${fmtMoney(p.sellPrice)} · أُضيف ${fmtDate(p.dateAdded)}</div></div>
+            <div class="card-sub">شراء ${fmtMoney(p.buyPrice)} · بيع ${fmtMoney(p.sellPrice)} · أُضيف ${fmtDate(p.dateAdded)}</div>
+            <div class="card-sub">الكمية المدخلة: ${added} · الكمية الحالية: ${p.qty}</div></div>
           </div>
           <div class="card-badge ${low?'badge-danger':'badge-ok'}">${p.qty}</div>
         </div>
         <div class="card-actions">
+          <button class="btn btn-gold btn-sm" data-restock="${p.id}">إضافة كمية</button>
           <button class="btn btn-outline btn-sm" data-edit="${p.id}">تعديل</button>
           <button class="btn btn-danger btn-sm" data-del="${p.id}">حذف</button>
         </div>
@@ -510,11 +520,33 @@ function renderProducts(){
   document.getElementById('content').innerHTML = html;
   document.getElementById('prodSearch').addEventListener('input', e=>{ subState.query = e.target.value; renderProducts(); });
   document.querySelectorAll('[data-edit]').forEach(el=> el.addEventListener('click', ()=> openProductForm(el.dataset.edit)));
+  document.querySelectorAll('[data-restock]').forEach(el=> el.addEventListener('click', ()=> openRestockForm(el.dataset.restock)));
   document.querySelectorAll('[data-del]').forEach(el=> el.addEventListener('click', ()=>{
     if(confirm('هل تريد حذف هذا المنتج؟')){
       DB.products = DB.products.filter(p=>p.id!==el.dataset.del); saveDB(); renderProducts(); toast('تم الحذف');
     }
   }));
+}
+
+function openRestockForm(id){
+  const p = DB.products.find(x=>x.id===id);
+  const body = `
+    <div class="card-sub" style="margin-bottom:10px;">الكمية الحالية: ${p.qty} · الكمية المدخلة إجمالاً: ${p.addedQty!=null?p.addedQty:p.qty}</div>
+    <div class="field"><label>الكمية المضافة الجديدة</label><input id="f_addqty" type="number" value="0" min="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
+      <button class="btn btn-primary" id="saveBtn">إضافة للمخزون</button>
+    </div>`;
+  const ov = openModal('إضافة كمية جديدة: ' + p.name + ' — ' + p.weight, body, o=>{
+    o.querySelector('#cancelBtn').addEventListener('click', ()=> closeModal(o));
+    o.querySelector('#saveBtn').addEventListener('click', ()=>{
+      const add = parseFloat(o.querySelector('#f_addqty').value)||0;
+      if(add<=0){ toast('أدخل كمية أكبر من صفر'); return; }
+      p.qty = Number(p.qty) + add;
+      p.addedQty = Number(p.addedQty!=null?p.addedQty:p.qty-add) + add;
+      saveDB(); closeModal(o); renderProducts(); toast('تم تحديث المخزون');
+    });
+  });
 }
 function searchIcon(){ return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8B5E3C" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>'; }
 function emptyState(title,sub){
@@ -548,6 +580,7 @@ function openProductForm(id){
       <div class="field"><label>الكمية الحالية</label><input id="f_qty" type="number" value="${p?p.qty:''}"></div>
       <div class="field"><label>الحد الأدنى للمخزون</label><input id="f_min" type="number" value="${p?p.minStock:'5'}"></div>
     </div>
+    ${p?`<div class="card-sub" style="margin:-4px 0 10px;">الكمية المدخلة إجمالاً حتى الآن: ${p.addedQty!=null?p.addedQty:p.qty} (تُحسب تلقائيًا — استخدم "إضافة كمية" من القائمة لتسجيل دفعة توريد جديدة بدقة)</div>`:''}
     <div class="modal-actions">
       <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
       <button class="btn btn-primary" id="saveBtn">${p?'حفظ التعديل':'إضافة المنتج'}</button>
@@ -583,9 +616,12 @@ function openProductForm(id){
       const minStock = parseFloat(ov.querySelector('#f_min').value)||0;
       if(!name || !weight){ toast('يرجى إدخال اسم الصنف والوزن'); return; }
       if(p){
-        Object.assign(p, {name,weight,buyPrice,sellPrice,qty,minStock,photo:photoData});
+        const oldQty = Number(p.qty)||0;
+        let addedQty = Number(p.addedQty!=null ? p.addedQty : oldQty);
+        if(qty > oldQty) addedQty += (qty - oldQty);
+        Object.assign(p, {name,weight,buyPrice,sellPrice,qty,minStock,photo:photoData,addedQty});
       } else {
-        DB.products.push({id:uid(), name, weight, buyPrice, sellPrice, qty, minStock, photo:photoData, dateAdded: todayISO()});
+        DB.products.push({id:uid(), name, weight, buyPrice, sellPrice, qty, addedQty:qty, minStock, photo:photoData, dateAdded: todayISO()});
       }
       saveDB(); closeModal(ov); renderProducts(); toast('تم الحفظ بنجاح');
     });
@@ -723,7 +759,7 @@ function renderStatement(){
   html += `<button class="btn btn-gold btn-block" id="printStmt" style="margin-bottom:14px;">طباعة كشف الحساب</button>`;
 
   html += `<h3 style="font-size:14px;margin:10px 0 8px;">الفواتير</h3>`;
-  html += invs.length ? invs.map(i=>`<div class="card"><div class="card-row"><div><div class="card-title">فاتورة ${fmtDate(i.date)}</div><div class="card-sub">مدفوع ${fmtMoney(i.paidAtSale)} من ${fmtMoney(i.total)}</div></div><div class="card-badge ${i.total-i.paidAtSale>0?'badge-danger':'badge-ok'}">${fmtMoney(i.total)}</div></div><div class="card-actions"><button class="btn btn-outline btn-sm" data-editpaid="${i.id}">تعديل المبلغ المدفوع</button></div></div>`).join('') : emptyState('لا توجد فواتير','');
+  html += invs.length ? invs.map(i=>`<div class="card"><div class="card-row"><div><div class="card-title">فاتورة ${fmtDate(i.date)}</div><div class="card-sub">مدفوع ${fmtMoney(i.paidAtSale)} من ${fmtMoney(i.total)}</div></div><div class="card-badge ${i.total-i.paidAtSale>0?'badge-danger':'badge-ok'}">${fmtMoney(i.total)}</div></div><div class="card-actions"><button class="btn btn-outline btn-sm" data-editpaid="${i.id}">تعديل المبلغ / التاريخ</button></div></div>`).join('') : emptyState('لا توجد فواتير','');
   html += `<h3 style="font-size:14px;margin:14px 0 8px;">الدفعات</h3>`;
   html += pays.length ? pays.map(p=>`<div class="card"><div class="card-row"><div><div class="card-title">${fmtMoney(p.amount)}</div><div class="card-sub">${fmtDate(p.date)} ${p.note?'· '+p.note:''}</div></div></div><div class="card-actions"><button class="btn btn-outline btn-sm" data-editpay="${p.id}">تعديل</button><button class="btn btn-danger btn-sm" data-delpay="${p.id}">حذف</button></div></div>`).join('') : emptyState('لا توجد دفعات إضافية','');
 
@@ -745,17 +781,20 @@ function openEditInvoicePaid(invId){
   const body = `
     <div class="card-sub" style="margin-bottom:10px;">إجمالي الفاتورة: ${fmtMoney(inv.total)}</div>
     <div class="field"><label>المبلغ المدفوع</label><input id="f_paidedit" type="number" value="${inv.paidAtSale}"></div>
+    <div class="field"><label>تاريخ الفاتورة</label><input id="f_dateedit" type="date" value="${inv.date}"></div>
     <div class="modal-actions">
       <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
       <button class="btn btn-primary" id="saveBtn">حفظ</button>
     </div>`;
-  const ov = openModal('تعديل المبلغ المدفوع للفاتورة', body, o=>{
+  const ov = openModal('تعديل الفاتورة', body, o=>{
     o.querySelector('#cancelBtn').addEventListener('click', ()=> closeModal(o));
     o.querySelector('#saveBtn').addEventListener('click', ()=>{
       let val = parseFloat(o.querySelector('#f_paidedit').value)||0;
       val = Math.max(0, Math.min(val, inv.total));
       inv.paidAtSale = val;
-      saveDB(); closeModal(o); renderStatement(); toast('تم تحديث المبلغ المدفوع');
+      const newDate = o.querySelector('#f_dateedit').value;
+      if(newDate) inv.date = newDate;
+      saveDB(); closeModal(o); renderStatement(); toast('تم تحديث الفاتورة');
     });
   });
 }
@@ -830,12 +869,26 @@ function renderSales(){
         </div>
         <div class="card-actions">
           <button class="btn btn-outline btn-sm" data-view="${i.id}">عرض / طباعة</button>
+          <button class="btn btn-danger btn-sm" data-delinv="${i.id}">حذف</button>
         </div>
       </div>`;
     }).join('');
   }
   document.getElementById('content').innerHTML = html;
   document.querySelectorAll('[data-view]').forEach(el=> el.addEventListener('click', ()=> viewInvoice(el.dataset.view)));
+  document.querySelectorAll('[data-delinv]').forEach(el=> el.addEventListener('click', ()=> deleteInvoice(el.dataset.delinv)));
+}
+
+function deleteInvoice(id){
+  const inv = DB.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  if(!confirm('هل تريد حذف هذه الفاتورة؟ سيتم إرجاع الكميات المخصومة إلى المخزون تلقائيًا.')) return;
+  inv.items.forEach(it=>{
+    const p = DB.products.find(x=>x.id===it.productId);
+    if(p) p.qty = Number(p.qty) + Number(it.qty);
+  });
+  DB.invoices = DB.invoices.filter(i=>i.id!==id);
+  saveDB(); renderSales(); toast('تم حذف الفاتورة وإرجاع الكميات للمخزون');
 }
 
 function viewInvoice(id){
@@ -851,10 +904,36 @@ function viewInvoice(id){
     <div class="modal-actions">
       <button class="btn btn-outline" id="closeBtn">إغلاق</button>
       <button class="btn btn-gold" id="printBtn">طباعة</button>
-    </div>`;
+    </div>
+    <button class="btn btn-outline btn-block" id="editPaidBtn" style="margin-top:10px;">تعديل المبلغ المدفوع / التاريخ</button>
+    <button class="btn btn-danger btn-block" id="deleteInvBtn" style="margin-top:10px;">حذف الفاتورة</button>`;
   const ov = openModal('تفاصيل الفاتورة', body, o=>{
     o.querySelector('#closeBtn').addEventListener('click', ()=> closeModal(o));
     o.querySelector('#printBtn').addEventListener('click', ()=> printInvoice(inv, mer));
+    o.querySelector('#editPaidBtn').addEventListener('click', ()=>{ closeModal(o); openEditInvoicePaidFromSales(inv.id); });
+    o.querySelector('#deleteInvBtn').addEventListener('click', ()=>{ closeModal(o); deleteInvoice(inv.id); });
+  });
+}
+function openEditInvoicePaidFromSales(invId){
+  const inv = DB.invoices.find(i=>i.id===invId);
+  const body = `
+    <div class="card-sub" style="margin-bottom:10px;">إجمالي الفاتورة: ${fmtMoney(inv.total)}</div>
+    <div class="field"><label>المبلغ المدفوع</label><input id="f_paidedit" type="number" value="${inv.paidAtSale}"></div>
+    <div class="field"><label>تاريخ الفاتورة</label><input id="f_dateedit" type="date" value="${inv.date}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
+      <button class="btn btn-primary" id="saveBtn">حفظ</button>
+    </div>`;
+  const ov = openModal('تعديل الفاتورة', body, o=>{
+    o.querySelector('#cancelBtn').addEventListener('click', ()=> closeModal(o));
+    o.querySelector('#saveBtn').addEventListener('click', ()=>{
+      let val = parseFloat(o.querySelector('#f_paidedit').value)||0;
+      val = Math.max(0, Math.min(val, inv.total));
+      inv.paidAtSale = val;
+      const newDate = o.querySelector('#f_dateedit').value;
+      if(newDate) inv.date = newDate;
+      saveDB(); closeModal(o); renderSales(); toast('تم تحديث الفاتورة');
+    });
   });
 }
 function printInvoice(inv, mer){
