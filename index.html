@@ -621,6 +621,7 @@ function renderMerchants(){
           <button class="btn btn-outline btn-sm" data-stmt="${m.id}">كشف حساب</button>
           <button class="btn btn-gold btn-sm" data-pay="${m.id}">إضافة دفعة</button>
           <button class="btn btn-outline btn-sm" data-edit="${m.id}">تعديل</button>
+          <button class="btn btn-danger btn-sm" data-delmer="${m.id}">حذف</button>
         </div>
       </div>`;
     }).join('');
@@ -630,6 +631,16 @@ function renderMerchants(){
   document.querySelectorAll('[data-edit]').forEach(el=> el.addEventListener('click', ()=> openMerchantForm(el.dataset.edit)));
   document.querySelectorAll('[data-pay]').forEach(el=> el.addEventListener('click', ()=> openPaymentForm(el.dataset.pay)));
   document.querySelectorAll('[data-stmt]').forEach(el=> el.addEventListener('click', ()=> navigate('statement', {merchantId: el.dataset.stmt})));
+  document.querySelectorAll('[data-delmer]').forEach(el=> el.addEventListener('click', ()=>{
+    const mid = el.dataset.delmer;
+    const m = DB.merchants.find(x=>x.id===mid);
+    const bal = merchantBalance(mid);
+    let msg = `هل تريد حذف التاجر "${m.name}"؟`;
+    if(bal.remaining>0) msg += `\nتنبيه: عليه رصيد متبقي ${fmtMoney(bal.remaining)} — سيتم حذف بياناته فقط مع الاحتفاظ بسجل الفواتير والدفعات القديمة.`;
+    if(!confirm(msg)) return;
+    DB.merchants = DB.merchants.filter(x=>x.id!==mid);
+    saveDB(); renderMerchants(); toast('تم حذف التاجر');
+  }));
 }
 
 function openMerchantForm(id){
@@ -712,13 +723,64 @@ function renderStatement(){
   html += `<button class="btn btn-gold btn-block" id="printStmt" style="margin-bottom:14px;">طباعة كشف الحساب</button>`;
 
   html += `<h3 style="font-size:14px;margin:10px 0 8px;">الفواتير</h3>`;
-  html += invs.length ? invs.map(i=>`<div class="card"><div class="card-row"><div><div class="card-title">فاتورة ${fmtDate(i.date)}</div><div class="card-sub">مدفوع ${fmtMoney(i.paidAtSale)} من ${fmtMoney(i.total)}</div></div><div class="card-badge ${i.total-i.paidAtSale>0?'badge-danger':'badge-ok'}">${fmtMoney(i.total)}</div></div></div>`).join('') : emptyState('لا توجد فواتير','');
+  html += invs.length ? invs.map(i=>`<div class="card"><div class="card-row"><div><div class="card-title">فاتورة ${fmtDate(i.date)}</div><div class="card-sub">مدفوع ${fmtMoney(i.paidAtSale)} من ${fmtMoney(i.total)}</div></div><div class="card-badge ${i.total-i.paidAtSale>0?'badge-danger':'badge-ok'}">${fmtMoney(i.total)}</div></div><div class="card-actions"><button class="btn btn-outline btn-sm" data-editpaid="${i.id}">تعديل المبلغ المدفوع</button></div></div>`).join('') : emptyState('لا توجد فواتير','');
   html += `<h3 style="font-size:14px;margin:14px 0 8px;">الدفعات</h3>`;
-  html += pays.length ? pays.map(p=>`<div class="card"><div class="card-row"><div><div class="card-title">${fmtMoney(p.amount)}</div><div class="card-sub">${fmtDate(p.date)} ${p.note?'· '+p.note:''}</div></div></div></div>`).join('') : emptyState('لا توجد دفعات إضافية','');
+  html += pays.length ? pays.map(p=>`<div class="card"><div class="card-row"><div><div class="card-title">${fmtMoney(p.amount)}</div><div class="card-sub">${fmtDate(p.date)} ${p.note?'· '+p.note:''}</div></div></div><div class="card-actions"><button class="btn btn-outline btn-sm" data-editpay="${p.id}">تعديل</button><button class="btn btn-danger btn-sm" data-delpay="${p.id}">حذف</button></div></div>`).join('') : emptyState('لا توجد دفعات إضافية','');
 
   document.getElementById('content').innerHTML = html;
   document.getElementById('backBtn').addEventListener('click', ()=> navigate('merchants'));
   document.getElementById('printStmt').addEventListener('click', ()=> printStatement(m, invs, pays, bal));
+  document.querySelectorAll('[data-editpaid]').forEach(el=> el.addEventListener('click', ()=> openEditInvoicePaid(el.dataset.editpaid)));
+  document.querySelectorAll('[data-editpay]').forEach(el=> el.addEventListener('click', ()=> openEditPaymentForm(el.dataset.editpay)));
+  document.querySelectorAll('[data-delpay]').forEach(el=> el.addEventListener('click', ()=>{
+    if(confirm('هل تريد حذف هذه الدفعة؟')){
+      DB.payments = DB.payments.filter(p=>p.id!==el.dataset.delpay);
+      saveDB(); renderStatement(); toast('تم حذف الدفعة');
+    }
+  }));
+}
+
+function openEditInvoicePaid(invId){
+  const inv = DB.invoices.find(i=>i.id===invId);
+  const body = `
+    <div class="card-sub" style="margin-bottom:10px;">إجمالي الفاتورة: ${fmtMoney(inv.total)}</div>
+    <div class="field"><label>المبلغ المدفوع</label><input id="f_paidedit" type="number" value="${inv.paidAtSale}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
+      <button class="btn btn-primary" id="saveBtn">حفظ</button>
+    </div>`;
+  const ov = openModal('تعديل المبلغ المدفوع للفاتورة', body, o=>{
+    o.querySelector('#cancelBtn').addEventListener('click', ()=> closeModal(o));
+    o.querySelector('#saveBtn').addEventListener('click', ()=>{
+      let val = parseFloat(o.querySelector('#f_paidedit').value)||0;
+      val = Math.max(0, Math.min(val, inv.total));
+      inv.paidAtSale = val;
+      saveDB(); closeModal(o); renderStatement(); toast('تم تحديث المبلغ المدفوع');
+    });
+  });
+}
+
+function openEditPaymentForm(payId){
+  const p = DB.payments.find(x=>x.id===payId);
+  const body = `
+    <div class="field"><label>المبلغ</label><input id="f_amount" type="number" value="${p.amount}"></div>
+    <div class="field"><label>التاريخ</label><input id="f_date" type="date" value="${p.date}"></div>
+    <div class="field"><label>ملاحظة</label><input id="f_note" value="${p.note||''}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelBtn">إلغاء</button>
+      <button class="btn btn-primary" id="saveBtn">حفظ التعديل</button>
+    </div>`;
+  const ov = openModal('تعديل الدفعة', body, o=>{
+    o.querySelector('#cancelBtn').addEventListener('click', ()=> closeModal(o));
+    o.querySelector('#saveBtn').addEventListener('click', ()=>{
+      const amount = parseFloat(o.querySelector('#f_amount').value)||0;
+      const date = o.querySelector('#f_date').value || p.date;
+      const note = o.querySelector('#f_note').value.trim();
+      if(amount<=0){ toast('يرجى إدخال مبلغ صحيح'); return; }
+      Object.assign(p, {amount, date, note});
+      saveDB(); closeModal(o); renderStatement(); toast('تم حفظ التعديل');
+    });
+  });
 }
 
 function printStatement(m, invs, pays, bal){
